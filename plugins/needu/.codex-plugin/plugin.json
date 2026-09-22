@@ -1,0 +1,24 @@
+{
+  "name": "needu",
+  "version": "0.1.4",
+  "description": "A durable decision and approval inbox for coding agents.",
+  "author": {
+    "name": "Needu",
+    "url": "https://needu.ai"
+  },
+  "homepage": "https://needu.ai",
+  "repository": "https://github.com/jonahseguin/needu-plugins",
+  "keywords": ["approvals", "decisions", "coding-agents"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Needu",
+    "shortDescription": "Wait for durable human decisions",
+    "longDescription": "Ask questions and request approvals through Needu. Keep the current Codex task attached to its pending requests.",
+    "developerName": "Needu",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://needu.ai",
+    "defaultPrompt": ["Ask me a question through Needu.", "Request my approval through Needu."]
+  },
+  "mcpServers": "./.mcp.json"
+}

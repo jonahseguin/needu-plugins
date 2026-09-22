@@ -1,0 +1,51 @@
+{
+  "description": "Save Needu requests, restore pending receipts, and require every successful submission to start awaiting an answer.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__plugin_needu_needu__(ask_user|request_approval|submit_requests|await_answer|reply_to_discussion|revise_request|ack_delivery|cancel_request)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/claude-post-tool-capture.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/claude-stop-guard.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/claude-stop-guard.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^(startup|resume|compact|clear|fork)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-recovery.mjs\" claude",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
+}

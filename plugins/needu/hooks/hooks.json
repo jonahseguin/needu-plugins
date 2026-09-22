@@ -1,0 +1,103 @@
+{
+  "description": "Keep Codex attached to Needu requests created in the current task.",
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "^mcp__(?:plugin_needu_needu|needu)__(ask_user|request_approval|submit_requests|await_answer|reply_to_discussion|revise_request|ack_delivery|cancel_request)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/codex-post-tool-capture.mjs\"",
+            "timeout": 3,
+            "statusMessage": "Saving Needu recovery state"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/session-recovery.mjs\" codex",
+            "timeout": 3,
+            "statusMessage": "Checking Needu recovery state",
+            "additionalContextLimit": 1000
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/codex-stop-guard.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/codex-stop-guard.mjs\"",
+            "timeout": 3,
+            "statusMessage": "Checking active Needu requests"
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/codex-stop-guard.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^mcp__(?:plugin_needu_needu|needu)__await_answer$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/codex-wait-start.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/codex-stop-guard.mjs\"",
+            "timeout": 3,
+            "statusMessage": "Checking active Needu requests"
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/hooks/session-recovery.mjs\" codex",
+            "timeout": 3,
+            "statusMessage": "Checking Needu recovery state",
+            "additionalContextLimit": 1000
+          }
+        ]
+      }
+    ]
+  }
+}

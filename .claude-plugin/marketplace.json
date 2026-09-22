@@ -1,0 +1,17 @@
+{
+  "name": "needu",
+  "owner": {
+    "name": "Needu",
+    "url": "https://needu.ai"
+  },
+  "description": "Needu plugins for durable human decisions",
+  "plugins": [
+    {
+      "name": "needu",
+      "source": "./plugins/needu-claude",
+      "description": "Ask for human decisions and recover pending Needu requests.",
+      "version": "0.1.4",
+      "category": "Productivity"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "name": "needu",
+  "interface": {
+    "displayName": "Needu"
+  },
+  "plugins": [
+    {
+      "name": "needu",
+      "source": {
+        "source": "local",
+        "path": "./plugins/needu"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
