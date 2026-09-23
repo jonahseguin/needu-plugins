@@ -24,15 +24,20 @@ the fields and validation rules in the current MCP tool definition.
 ## Make a request someone can decide
 
 State the decision needed, the relevant facts, and what happens after each option.
-Offer clear options and mark one recommendation with its reason. Put the complete
-plan or artifact in the request. Do not make the reviewer reconstruct it from chat
-or terminal output.
+For multiple-choice questions, set `recommendedOptionId` to the `id` of the option
+you actually recommend. Explain why in `recommendation` prose or the question
+context. Choose from the stated options, not their order. For a neutral fact
+question or a personal preference only the person can judge, omit the field
+instead of inventing a recommendation. Put the complete plan or artifact
+in the request; do not make the reviewer reconstruct it from chat or terminal output.
 
 The creation input includes `requestId`, `idempotencyKey`, `title`,
 `contextMarkdown`, `options`, optional `recommendation`, `priority`, `revision`,
 and source project and session IDs. `ask_user` also takes `kind`, either `question`
 or `action`. `request_approval` sets the approval kind itself. Supply a revision such as
 `plan-v1`. Needu stores that exact value, and the human decision must name it.
+Use `recommendedOptionId` only for question choices. For an approval, put any
+suggestion and its reason in `recommendation` prose.
 The Claude plugin's PreToolUse hook replaces the source session ID with Claude's
 real session ID and adds its title when SessionStart supplied one. Provide the
 source project ID, and do not invent a session title.
@@ -46,7 +51,9 @@ revision.
 When several decisions are ready and none depends on another answer, use
 `submit_requests` with a `requests` array. Supply the complete creation fields for
 each item, including its explicit kind, unique request ID, idempotency key and
-revision. Save those identities before submitting. Follow the tool's batch limit.
+revision. Set `recommendedOptionId` against that item's options when you recommend
+a choice on a question item. Save those identities before submitting. Follow the tool's
+batch limit.
 
 Each result names its request and reports `submitted` with the saved request or
 `failed` with an error. Save every successful result even when another item fails.
@@ -72,8 +79,9 @@ Retry a failed submission with the same idempotency key only when every submitte
 field is identical. A same-key changed payload conflicts. If a request is waiting
 for human review and its content changes, use `revise_request` with its exact current
 revision, a new idempotency key, and a new immutable revision. If a human discussion
-is waiting, use `reply_to_discussion` with an amendment instead. Never reuse an
-approved revision for changed work.
+is waiting, use `reply_to_discussion` with an amendment instead. A new question
+revision or amendment has its own options and `recommendedOptionId`; choose the ID
+again if you still recommend an option. Never reuse an approved revision for changed work.
 
 If the human requests changes, the request remains open in `waiting_agent`. Treat
 the feedback as discussion, reply on the same request with `reply_to_discussion`,
