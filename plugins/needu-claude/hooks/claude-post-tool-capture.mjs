@@ -22382,7 +22382,7 @@ var HostSessionSchema = exports_Schema.Struct({
 });
 var DeliverySchema = exports_Schema.Struct({
   cursor: Cursor,
-  kind: exports_Schema.Literals(["discussion", "agent_reply", "decision", "revision"]),
+  kind: exports_Schema.Literals(["discussion", "agent_reply", "decision", "revision", "cancel"]),
   revision: Identifier,
 });
 var ReceiptState = exports_Schema.Literals([
@@ -22553,7 +22553,13 @@ var PendingPointerSchema = exports_Schema.Union([
   exports_Schema.Struct({
     ...PendingCommon,
     deliveredCursor: Cursor,
-    deliveredKind: exports_Schema.Literals(["discussion", "agent_reply", "decision", "revision"]),
+    deliveredKind: exports_Schema.Literals([
+      "discussion",
+      "agent_reply",
+      "decision",
+      "revision",
+      "cancel",
+    ]),
   }),
 ]);
 var InspectionCommon = {
@@ -22570,7 +22576,13 @@ var PendingInspectionSchema = exports_Schema.Union([
   exports_Schema.Struct({
     ...InspectionCommon,
     deliveredCursor: Cursor,
-    deliveredKind: exports_Schema.Literals(["discussion", "agent_reply", "decision", "revision"]),
+    deliveredKind: exports_Schema.Literals([
+      "discussion",
+      "agent_reply",
+      "decision",
+      "revision",
+      "cancel",
+    ]),
   }),
 ]);
 var exact = { onExcessProperty: "error" };

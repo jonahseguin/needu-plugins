@@ -33,6 +33,9 @@ The creation input includes `requestId`, `idempotencyKey`, `title`,
 and source project and session IDs. `ask_user` also takes `kind`, either `question`
 or `action`. `request_approval` sets the approval kind itself. Supply a revision such as
 `plan-v1`. Needu stores that exact value, and the human decision must name it.
+The Claude plugin's PreToolUse hook replaces the source session ID with Claude's
+real session ID and adds its title when SessionStart supplied one. Provide the
+source project ID, and do not invent a session title.
 Record the returned request ID, idempotency key, revision, and latest delivered
 cursor in the task notes before waiting. Tell the human where to answer and show the
 ID and revision so they can recover after a restart. Approval applies only to that
@@ -82,7 +85,7 @@ resolve a request.
 
 Creation returns the durable request immediately; it does not start a wait. Start
 `await_answer` for each pending request before ending the turn. Call it with its
-`requestId`. Needu resumes after the creating agent's latest durable acknowledgment
+`requestId`. Needu resumes after this connection's latest durable acknowledgment
 when `afterCursor` is omitted; pass `afterCursor` only when using an explicitly saved
 cursor. It returns the next event and its cursor. Save that cursor before handling
 the event. A human discussion message grants no
@@ -114,6 +117,17 @@ at 1 second and doubling up to 60 seconds. A disconnected delivery does not canc
 the request. If authentication or access requires human action, report the problem
 and preserve the request for recovery. Never retry a revoked connection indefinitely.
 
+## Find a request after switching connections
+
+When the person asks to recover a request but its ID is unavailable, call
+`list_requests` for open requests in their workspace. It returns 20 summaries at a
+time; use `offset` for the next page. Match the project, session title or ID, and
+request title with the person's task, then call `get_request` to inspect the exact
+request. Ask the person to choose if more than one fits. Do not resume or acknowledge
+an unconfirmed request. A new connection can call `await_answer` for a confirmed
+request and keeps its own delivery cursor. Record each returned event before
+acknowledging it. Listing and reading never acknowledge an event.
+
 ### Claude waits
 
 Claude Code can move a long main-conversation MCP call to the background and deliver
@@ -144,15 +158,15 @@ explicit user request to stop waiting. Cancel the request only when the user ask
 withdraw it; otherwise stop delivery without changing the pending request.
 
 After a restart, recover the ID, revision, and latest acknowledged cursor from prior
-tool results or task notes for this task and project. Do not attach to a stale or
-foreign request. If the request ID is unavailable, ask the user for it rather than
-creating a replacement or repeatedly waiting on a guessed ID. Report the saved
+tool results or task notes for this task and project. If the ID is unavailable,
+use `list_requests` and `get_request` as described above. Report the saved
 decision and note. An approval permits only its described revision; rejection stops
 it, and requested changes keep the same discussion open until a later explicit
 decision.
 
 Use `cancel_request` with the same ID and revision when withdrawing a pending
-request. Only the OAuth client and user that created it can cancel it.
+request. The signed-in workspace member can cancel it; the original author stays
+visible in Needu.
 
 Only an explicit saved decision for the matching revision permits dependent work.
 An agent OAuth grant can submit and read requests. It cannot approve its own work.

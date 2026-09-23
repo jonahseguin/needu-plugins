@@ -22176,23 +22176,64 @@ function resolveAnnotations(schema) {
 function resolveAnnotationsKey(schema) {
   return schema.ast.context?.annotations;
 }
+// packages/needu-recovery/src/claude-session-source.mts
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { join as join2 } from "node:path";
+var SessionSource = exports_Schema.Struct({
+  sessionId: exports_Schema.NonEmptyString,
+  sessionTitle: exports_Schema.optionalKey(exports_Schema.NonEmptyString),
+});
+var ClaudeToolInput = exports_Schema.Record(exports_Schema.String, exports_Schema.Unknown);
+var Requests = exports_Schema.Array(ClaudeToolInput);
+var sourcePath = (projectRoot, sessionId) =>
+  join2(
+    projectRoot,
+    ".needu",
+    "session-source",
+    `${createHash("sha256").update(sessionId).digest("hex")}.json`,
+  );
+async function saveClaudeSessionSource(projectRoot, sessionId, sessionTitle) {
+  const path = sourcePath(projectRoot, sessionId);
+  const title = sessionTitle?.trim();
+  const sourceInput =
+    title !== undefined && title.length > 0 ? { sessionId, sessionTitle: title } : { sessionId };
+  const source = exports_Schema.decodeUnknownSync(SessionSource)(sourceInput);
+  await mkdir(join2(projectRoot, ".needu", "session-source"), { recursive: true });
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, JSON.stringify(source), { flag: "wx", mode: 384 });
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
 // packages/needu-recovery/src/receipt-core.mts
 import { execFileSync } from "node:child_process";
-import { createHash as createHash2, randomUUID } from "node:crypto";
+import { createHash as createHash3, randomUUID as randomUUID2 } from "node:crypto";
 // packages/needu-recovery/src/receipt-reducer.ts
-import { createHash } from "node:crypto";
-import { link as link2, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { createHash as createHash2 } from "node:crypto";
+import {
+  link as link2,
+  mkdir as mkdir2,
+  readFile as readFile2,
+  readdir,
+  rename as rename2,
+  rm as rm2,
+  writeFile as writeFile2,
+} from "node:fs/promises";
 import {
   basename,
   dirname,
   isAbsolute,
-  join as join2,
+  join as join3,
   relative,
   resolve as resolve2,
   sep,
 } from "node:path";
 import { fileURLToPath } from "node:url";
-var hashFor = (requestId) => createHash("sha256").update(requestId).digest("hex");
+var hashFor = (requestId) => createHash2("sha256").update(requestId).digest("hex");
 var receiptHost = (receipt) => {
   if (receipt.version === 5) return receipt.hostSession;
   if (receipt.kind !== "created") return;
@@ -22397,7 +22438,7 @@ var HostSessionSchema = exports_Schema.Struct({
 });
 var DeliverySchema = exports_Schema.Struct({
   cursor: Cursor,
-  kind: exports_Schema.Literals(["discussion", "agent_reply", "decision", "revision"]),
+  kind: exports_Schema.Literals(["discussion", "agent_reply", "decision", "revision", "cancel"]),
   revision: Identifier,
 });
 var ReceiptState = exports_Schema.Literals([
@@ -22568,7 +22609,13 @@ var PendingPointerSchema = exports_Schema.Union([
   exports_Schema.Struct({
     ...PendingCommon,
     deliveredCursor: Cursor,
-    deliveredKind: exports_Schema.Literals(["discussion", "agent_reply", "decision", "revision"]),
+    deliveredKind: exports_Schema.Literals([
+      "discussion",
+      "agent_reply",
+      "decision",
+      "revision",
+      "cancel",
+    ]),
   }),
 ]);
 var InspectionCommon = {
@@ -22585,7 +22632,13 @@ var PendingInspectionSchema = exports_Schema.Union([
   exports_Schema.Struct({
     ...InspectionCommon,
     deliveredCursor: Cursor,
-    deliveredKind: exports_Schema.Literals(["discussion", "agent_reply", "decision", "revision"]),
+    deliveredKind: exports_Schema.Literals([
+      "discussion",
+      "agent_reply",
+      "decision",
+      "revision",
+      "cancel",
+    ]),
   }),
 ]);
 var exact = { onExcessProperty: "error" };
@@ -22716,12 +22769,12 @@ var creationReceipt = exports_Effect.fn("creationReceipt")(function* (input, out
   };
 });
 var readBuffer = (path) =>
-  exports_Effect.tryPromise({ try: () => readFile(path), catch: readFailure });
+  exports_Effect.tryPromise({ try: () => readFile2(path), catch: readFailure });
 var readText = (path) =>
-  exports_Effect.tryPromise({ try: () => readFile(path, "utf8"), catch: readFailure });
-var removePath = (path) => exports_Effect.tryPromise({ try: () => rm(path), catch: readFailure });
+  exports_Effect.tryPromise({ try: () => readFile2(path, "utf8"), catch: readFailure });
+var removePath = (path) => exports_Effect.tryPromise({ try: () => rm2(path), catch: readFailure });
 var makeDirectory = (path) =>
-  exports_Effect.tryPromise({ try: () => mkdir(path, { recursive: true }), catch: readFailure });
+  exports_Effect.tryPromise({ try: () => mkdir2(path, { recursive: true }), catch: readFailure });
 var readEntries = (path) =>
   exports_Effect.tryPromise({
     try: async () => {
@@ -22749,19 +22802,19 @@ var readNames = (path) =>
 var installExact = (target, contents) =>
   exports_Effect.tryPromise({
     try: async () => {
-      await mkdir(join2(target, ".."), { recursive: true });
-      const temporary = `${target}.${randomUUID()}.tmp`;
+      await mkdir2(join3(target, ".."), { recursive: true });
+      const temporary = `${target}.${randomUUID2()}.tmp`;
       try {
-        await writeFile(temporary, contents, { flag: "wx", mode: 384 });
+        await writeFile2(temporary, contents, { flag: "wx", mode: 384 });
         try {
           await link2(temporary, target);
         } catch (cause) {
           if (!isCode(cause, "EEXIST")) throw cause;
         }
       } finally {
-        await rm(temporary, { force: true });
+        await rm2(temporary, { force: true });
       }
-      const copied = await readFile(target);
+      const copied = await readFile2(target);
       if (!copied.equals(contents)) throw new Error("conflicting migrated receipt");
     },
     catch: readFailure,
@@ -22775,32 +22828,32 @@ var copyBeforeDelete = (source, target, transform3 = exports_Effect.succeed) =>
   });
 var migrateCodexLedger = (projectRoot) =>
   exports_Effect.gen(function* () {
-    const legacyRoot = join2(projectRoot, ".codex", "needu-pending");
+    const legacyRoot = join3(projectRoot, ".codex", "needu-pending");
     const entries3 = yield* readEntries(legacyRoot);
     yield* exports_Effect.forEach(
       entries3.filter((entry) => entry.isFile() && entry.name.endsWith(".json")),
       (entry) =>
         copyBeforeDelete(
-          join2(legacyRoot, entry.name),
-          join2(projectRoot, ".needu", "pending", `codex-${entry.name}`),
+          join3(legacyRoot, entry.name),
+          join3(projectRoot, ".needu", "pending", `codex-${entry.name}`),
         ),
       { concurrency: 1, discard: true },
     );
-    const legacyReceipts = join2(legacyRoot, "receipts");
+    const legacyReceipts = join3(legacyRoot, "receipts");
     const directories = (yield* readEntries(legacyReceipts)).filter((entry) => entry.isDirectory());
     yield* exports_Effect.forEach(
       directories,
       (directory) =>
         exports_Effect.gen(function* () {
-          const files = (yield* readNames(join2(legacyReceipts, directory.name))).filter((name) =>
+          const files = (yield* readNames(join3(legacyReceipts, directory.name))).filter((name) =>
             name.endsWith(".json"),
           );
           yield* exports_Effect.forEach(
             files,
             (file) =>
               copyBeforeDelete(
-                join2(legacyReceipts, directory.name, file),
-                join2(
+                join3(legacyReceipts, directory.name, file),
+                join3(
                   projectRoot,
                   ".needu",
                   "pending",
@@ -22825,14 +22878,14 @@ var migrateCodexLedger = (projectRoot) =>
   });
 var hasLegacyState = (projectRoot) =>
   exports_Effect.gen(function* () {
-    const legacyRoot = join2(projectRoot, ".codex", "needu-pending");
+    const legacyRoot = join3(projectRoot, ".codex", "needu-pending");
     const entries3 = yield* readEntries(legacyRoot);
     if (entries3.some((entry) => entry.isFile() && entry.name.endsWith(".json"))) return true;
-    const directories = (yield* readEntries(join2(legacyRoot, "receipts"))).filter((entry) =>
+    const directories = (yield* readEntries(join3(legacyRoot, "receipts"))).filter((entry) =>
       entry.isDirectory(),
     );
     const results = yield* exports_Effect.forEach(directories, (directory) =>
-      readNames(join2(legacyRoot, "receipts", directory.name)).pipe(
+      readNames(join3(legacyRoot, "receipts", directory.name)).pipe(
         exports_Effect.map((files) => files.some((file) => file.endsWith(".json"))),
       ),
     );
@@ -22895,34 +22948,34 @@ var migratePointers = (pendingRoot) =>
       files,
       (file) =>
         exports_Effect.gen(function* () {
-          const raw = yield* readText(join2(pendingRoot, file));
+          const raw = yield* readText(join3(pendingRoot, file));
           const value3 = yield* decodeJson(raw).pipe(exports_Effect.mapError(readFailure));
           const pointer = yield* decodeLegacyPointer(value3).pipe(
             exports_Effect.mapError(readFailure),
           );
           const receipts = yield* legacyReceipts(pointer);
-          const directory = join2(pendingRoot, "receipts", hashFor(pointer.requestId));
+          const directory = join3(pendingRoot, "receipts", hashFor(pointer.requestId));
           yield* makeDirectory(directory);
           yield* exports_Effect.forEach(
             receipts,
             (receipt, index2) =>
               installExact(
-                join2(
+                join3(
                   directory,
-                  `pointer-${createHash2("sha256").update(file).digest("hex")}-${index2}.json`,
+                  `pointer-${createHash3("sha256").update(file).digest("hex")}-${index2}.json`,
                 ),
                 Buffer.from(JSON.stringify(receipt)),
               ),
             { concurrency: 1, discard: true },
           );
-          yield* removePath(join2(pendingRoot, file));
+          yield* removePath(join3(pendingRoot, file));
         }),
       { concurrency: 1, discard: true },
     );
   });
 var loadPending = (projectRoot, { migrate = false } = {}) =>
   exports_Effect.gen(function* () {
-    const pendingRoot = join2(projectRoot, ".needu", "pending");
+    const pendingRoot = join3(projectRoot, ".needu", "pending");
     if (migrate) yield* migrateCodexLedger(projectRoot);
     else if (yield* hasLegacyState(projectRoot))
       return yield* readFailure(new Error("unmigrated legacy state"));
@@ -22932,17 +22985,17 @@ var loadPending = (projectRoot, { migrate = false } = {}) =>
         return yield* readFailure(new Error("unreduced legacy pointer"));
     }
     if (migrate) {
-      yield* makeDirectory(join2(pendingRoot, "receipts"));
+      yield* makeDirectory(join3(pendingRoot, "receipts"));
       yield* migratePointers(pendingRoot);
     }
-    const directories = yield* readNames(join2(pendingRoot, "receipts"));
+    const directories = yield* readNames(join3(pendingRoot, "receipts"));
     const values2 = yield* exports_Effect.forEach(directories, (name) =>
       exports_Effect.gen(function* () {
-        const directory = join2(pendingRoot, "receipts", name);
+        const directory = join3(pendingRoot, "receipts", name);
         const files = (yield* readNames(directory)).filter((file) => file.endsWith(".json"));
         const receipts = yield* exports_Effect.forEach(files, (file) =>
           exports_Effect.gen(function* () {
-            const raw = yield* readText(join2(directory, file));
+            const raw = yield* readText(join3(directory, file));
             const value3 = yield* decodeJson(raw).pipe(exports_Effect.mapError(readFailure));
             return yield* decodeReceipt(value3).pipe(exports_Effect.mapError(readFailure));
           }),
@@ -23014,6 +23067,7 @@ var SessionStart = exports_Schema.Struct({
   hook_event_name: exports_Schema.Literal("SessionStart"),
   source: exports_Schema.String,
   session_id: exports_Schema.optionalKey(exports_Schema.String),
+  session_title: exports_Schema.optionalKey(exports_Schema.String),
   cwd: exports_Schema.optionalKey(exports_Schema.String),
 });
 var RecoveryEvent = exports_Schema.Union([
@@ -23048,6 +23102,7 @@ for (let index2 = 0; index2 < scopeArguments.length; index2 += 2) {
 }
 if (scope3.has("--agent-id") && !scope3.has("--session-id")) process.exit(2);
 var eventSource;
+var eventSessionTitle;
 var eventCwd;
 var eventSessionId = scope3.get("--session-id");
 var eventAgentId = scope3.get("--agent-id");
@@ -23068,6 +23123,7 @@ if (!count && !list) {
     } else {
       if (!sources.includes(event.source)) process.exit(0);
       eventSource = event.source;
+      eventSessionTitle = event.session_title;
     }
     eventName = event.hook_event_name;
     eventCwd = event.cwd;
@@ -23082,6 +23138,15 @@ var pluginMode = pluginRoot !== undefined;
 var projectRoot = pluginMode
   ? projectRootFromCwd(eventCwd ?? process.cwd())
   : projectRootFromModuleUrl(import.meta.url);
+if (
+  !count &&
+  !list &&
+  selectedHost === "claude" &&
+  eventName === "SessionStart" &&
+  eventSessionId !== undefined &&
+  eventSessionId.length > 0
+)
+  await saveClaudeSessionSource(projectRoot, eventSessionId, eventSessionTitle);
 var runnerPath = pluginMode
   ? fileURLToPath2(import.meta.url)
   : projectRelativeModulePath(projectRoot, import.meta.url);

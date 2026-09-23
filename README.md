@@ -35,20 +35,17 @@ answer you save there.
 
 ## Existing manual setup
 
-Finish, cancel, or otherwise resolve every pending request through the original
-manual connection before switching. Plugin authentication creates a different
-OAuth client, so it cannot await, revise, or cancel requests owned by the old
-client. Preserve the project's `.needu` directory as request history.
-
-Once no request remains pending on the old connection, remove only its Needu MCP
-registration, standalone Needu skill, and old Needu hooks. Keep unrelated
-configuration. Then install and authenticate the plugin. Do not run both Needu
-connections against the same recovery ledger.
+The plugin creates a new OAuth client. Requests stay in your Needu workspace
+when you switch connections. Use `list_requests` to find open requests,
+`get_request` to confirm the right one, then `await_answer` with its ID.
+The new connection tracks its own delivery cursor. Preserve the project's
+`.needu` directory. Remove only the old Needu MCP registration, standalone
+Needu skill, and old Needu hooks; keep unrelated configuration.
 
 The plugin keeps the current host session attached to its pending Needu
 requests. It saves request IDs and delivery cursors, never answer content. A new
 task or app restart does not attach itself to an old request automatically; use
-the saved request ID and revision to call `await_answer` again.
+`list_requests` and `get_request` to identify it, then call `await_answer`.
 
 ## Update
 

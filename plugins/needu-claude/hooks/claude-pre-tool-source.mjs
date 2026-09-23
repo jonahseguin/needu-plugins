@@ -22173,192 +22173,64 @@ function resolveAnnotations(schema) {
 function resolveAnnotationsKey(schema) {
   return schema.ast.context?.annotations;
 }
+// packages/needu-recovery/src/claude-session-source.mts
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { join as join2 } from "node:path";
+var SessionSource = exports_Schema.Struct({
+  sessionId: exports_Schema.NonEmptyString,
+  sessionTitle: exports_Schema.optionalKey(exports_Schema.NonEmptyString),
+});
+var ClaudeToolInput = exports_Schema.Record(exports_Schema.String, exports_Schema.Unknown);
+var Requests = exports_Schema.Array(ClaudeToolInput);
+var sourcePath = (projectRoot, sessionId) =>
+  join2(
+    projectRoot,
+    ".needu",
+    "session-source",
+    `${createHash("sha256").update(sessionId).digest("hex")}.json`,
+  );
+async function readClaudeSessionTitle(projectRoot, sessionId) {
+  try {
+    const raw = await readFile(sourcePath(projectRoot, sessionId), "utf8");
+    const source = exports_Schema.decodeUnknownSync(SessionSource)(JSON.parse(raw));
+    return source.sessionId === sessionId ? source.sessionTitle : undefined;
+  } catch {
+    return;
+  }
+}
+function stampSource(input, sessionId, sessionTitle) {
+  const source = exports_Schema.decodeUnknownOption(ClaudeToolInput)(input.source);
+  if (exports_Option.isNone(source)) return;
+  const stampedSource = Object.fromEntries(
+    Object.entries(source.value).filter(([key]) => key !== "sessionTitle"),
+  );
+  stampedSource.sessionId = sessionId;
+  if (sessionTitle !== undefined) stampedSource.sessionTitle = sessionTitle;
+  return { ...input, source: stampedSource };
+}
+function stampClaudeRequestSource(toolName, input, sessionId, sessionTitle) {
+  if (toolName === "ask_user" || toolName === "request_approval")
+    return stampSource(input, sessionId, sessionTitle);
+  if (toolName !== "submit_requests") return;
+  const requests = exports_Schema.decodeUnknownOption(Requests)(input.requests);
+  if (exports_Option.isNone(requests)) return;
+  const stamped = requests.value.map((request3) => stampSource(request3, sessionId, sessionTitle));
+  if (stamped.some((request3) => request3 === undefined)) return;
+  return { ...input, requests: stamped };
+}
+
 // packages/needu-recovery/src/receipt-core.mts
 import { execFileSync } from "node:child_process";
-import { createHash as createHash2, randomUUID } from "node:crypto";
-// packages/needu-recovery/src/receipt-reducer.ts
-import { createHash } from "node:crypto";
-import { link as link2, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import {
   basename,
   dirname,
   isAbsolute,
-  join as join2,
+  join as join3,
   relative,
   resolve as resolve2,
   sep,
 } from "node:path";
-import { fileURLToPath } from "node:url";
-var hashFor = (requestId) => createHash("sha256").update(requestId).digest("hex");
-var receiptHost = (receipt) => {
-  if (receipt.version === 5) return receipt.hostSession;
-  if (receipt.kind !== "created") return;
-  return receipt.version === 3
-    ? { host: "codex", sessionId: receipt.hostSessionId }
-    : receipt.hostSession;
-};
-var receiptOrigin = (receipt) => {
-  if (receipt.version === 5) return receipt.origin;
-  if (receipt.kind !== "created") return;
-  return {
-    sourceSessionId: receipt.sourceSessionId,
-    initialRevision: receipt.initialRevision,
-    revisionCount: receipt.revisionCount,
-  };
-};
-var displayHost = ({ host, sessionId, agentId }) =>
-  `${host}:${sessionId}${agentId === undefined ? "" : `:${agentId}`}`;
-var onlyValue = (values2, message) => {
-  const first = values2[0];
-  if (first === undefined || values2.some((value3) => value3 !== first)) throw new Error(message);
-  return first;
-};
-var uniqueValue = (values2) => {
-  const first = values2[0];
-  return first === undefined || values2.some((value3) => value3 !== first) ? undefined : first;
-};
-function reduceReceipts(directoryName, receipts) {
-  if (receipts.length === 0) throw new Error("invalid receipt");
-  const first = receipts[0];
-  const requestId = first.requestId;
-  if (
-    directoryName !== hashFor(requestId) ||
-    receipts.some((receipt) => receipt.requestId !== requestId)
-  )
-    throw new Error("mixed request receipts");
-  const hosts = receipts.flatMap((receipt) => {
-    const host = receiptHost(receipt);
-    return host === undefined ? [] : [host];
-  });
-  if (receipts.some((receipt) => receipt.state === "cancelled")) return;
-  const origins = receipts.flatMap((receipt) => {
-    const origin = receiptOrigin(receipt);
-    return origin === undefined ? [] : [{ origin, receipt }];
-  });
-  const firstOrigin = origins.at(0)?.origin;
-  if (
-    firstOrigin !== undefined &&
-    origins.some(
-      ({ origin }) =>
-        origin.sourceSessionId !== firstOrigin.sourceSessionId ||
-        origin.initialRevision !== firstOrigin.initialRevision,
-    )
-  )
-    throw new Error("invalid receipt origin");
-  const newestCount = Math.max(0, ...origins.map(({ origin }) => origin.revisionCount));
-  const newestOriginReceipts = origins.filter(({ origin }) => origin.revisionCount === newestCount);
-  const originCurrentRevision =
-    newestOriginReceipts.length === 0
-      ? undefined
-      : onlyValue(
-          newestOriginReceipts.map(({ receipt }) => receipt.currentRevision),
-          "conflicting origin receipts",
-        );
-  const revisions = receipts.filter((receipt) => receipt.kind === "revised");
-  const newestRevisionCount = Math.max(0, ...revisions.map((receipt) => receipt.revisionCount));
-  const newestRevisions = revisions.filter(
-    (receipt) => receipt.revisionCount === newestRevisionCount,
-  );
-  const revisedCurrentRevision =
-    newestRevisions.length === 0
-      ? undefined
-      : onlyValue(
-          newestRevisions.map((receipt) => receipt.currentRevision),
-          "conflicting revision receipts",
-        );
-  const acknowledgedCursor = Math.max(
-    0,
-    ...receipts
-      .filter((receipt) => receipt.kind === "acknowledged")
-      .map((receipt) => receipt.acknowledgedCursor),
-  );
-  const newestAcknowledgements = receipts.filter(
-    (receipt) =>
-      receipt.kind === "acknowledged" && receipt.acknowledgedCursor === acknowledgedCursor,
-  );
-  const acknowledgedRevision = uniqueValue(
-    newestAcknowledgements.map((receipt) => receipt.currentRevision),
-  );
-  const deliveries = receipts
-    .flatMap((receipt) => {
-      if (receipt.kind === "awaited")
-        return receipt.delivery === undefined ? [] : [receipt.delivery];
-      return receipt.kind === "replied" ? receipt.deliveries : [];
-    })
-    .toSorted((left, right) => left.cursor - right.cursor);
-  for (let index2 = 1; index2 < deliveries.length; index2++) {
-    const previous = deliveries[index2 - 1];
-    const current = deliveries[index2];
-    if (
-      current.cursor === previous.cursor &&
-      (current.kind !== previous.kind || current.revision !== previous.revision)
-    )
-      throw new Error("conflicting delivery receipts");
-  }
-  const decisions = deliveries.filter((delivery) => delivery.kind === "decision");
-  const firstDecision = decisions.at(0);
-  if (
-    firstDecision !== undefined &&
-    decisions.some(
-      (decision) =>
-        decision.cursor !== firstDecision.cursor || decision.revision !== firstDecision.revision,
-    )
-  )
-    throw new Error("conflicting decision receipts");
-  const terminalReceipts = receipts.filter((receipt) => receipt.state === "decided");
-  const firstTerminal = terminalReceipts.at(0);
-  if (
-    firstTerminal !== undefined &&
-    terminalReceipts.some((receipt) => receipt.currentRevision !== firstTerminal.currentRevision)
-  )
-    throw new Error("conflicting terminal receipts");
-  if (
-    deliveries.some(
-      (delivery) => delivery.kind === "decision" && delivery.cursor <= acknowledgedCursor,
-    )
-  )
-    return;
-  const delivered = deliveries.find((delivery) => delivery.cursor > acknowledgedCursor);
-  const newestDelivery = deliveries.at(-1);
-  const newestDiscussion = deliveries.findLast((delivery) => delivery.kind === "discussion");
-  const repliedThrough = Math.max(
-    0,
-    ...receipts.filter((receipt) => receipt.kind === "replied").map((receipt) => receipt.inReplyTo),
-  );
-  const waitingOnAgent = newestDiscussion !== undefined && newestDiscussion.cursor > repliedThrough;
-  const observedStates = receipts
-    .map((receipt) => receipt.state)
-    .filter((state2) => state2 !== "cancelled");
-  const state =
-    firstTerminal !== undefined || newestDelivery?.kind === "decision"
-      ? "decided"
-      : waitingOnAgent
-        ? "waiting_agent"
-        : uniqueValue(observedStates);
-  const currentRevision =
-    firstTerminal === undefined
-      ? (newestDelivery?.revision ??
-        revisedCurrentRevision ??
-        originCurrentRevision ??
-        acknowledgedRevision ??
-        uniqueValue(receipts.map((receipt) => receipt.currentRevision)))
-      : firstTerminal.currentRevision;
-  const identity3 = {
-    requestId,
-    hostSessions: [...new Map(hosts.map((item) => [displayHost(item), item])).values()],
-    acknowledgedCursor,
-  };
-  const withRevision =
-    currentRevision === undefined ? identity3 : { ...identity3, currentRevision };
-  const withState = state === undefined ? withRevision : { ...withRevision, state };
-  const common =
-    firstOrigin === undefined
-      ? withState
-      : { ...withState, sourceSessionId: firstOrigin.sourceSessionId };
-  return delivered === undefined
-    ? common
-    : { ...common, deliveredCursor: delivered.cursor, deliveredKind: delivered.kind };
-}
 
 // packages/needu-recovery/src/receipt-schema.ts
 var Identifier = exports_Schema.String.check(exports_Schema.isMinLength(1));
@@ -22627,7 +22499,6 @@ var ReplyOutput = exports_Schema.Struct({
   events: exports_Schema.Array(DeliverySchema),
 });
 var ReviseInput = exports_Schema.Struct({ ...BaseInput, revision: Revision });
-var ReviseOutput = CreateOutput;
 var AcknowledgeInput = exports_Schema.Struct({ ...BaseInput, cursor: Cursor2 });
 var AcknowledgeOutput = exports_Schema.Struct({ ...BaseOutput, acknowledgedCursor: Cursor2 });
 var CancelInput = exports_Schema.Struct({ ...BaseInput, revision: Identifier2 });
@@ -22648,21 +22519,6 @@ var ToolName = exports_Schema.Literals([
 var Json3 = exports_Schema.fromJsonString(exports_Schema.Unknown);
 var NodeError = exports_Schema.Struct({ code: exports_Schema.String });
 var writeFailure = (cause) => new ReceiptWriteError({ cause });
-var readFailure = (cause) => new ReceiptReadError({ cause });
-var decodeJson = (contents) => exports_Schema.decodeUnknownEffect(Json3)(contents);
-var isCode = (cause, code) =>
-  exports_Schema
-    .decodeUnknownOption(NodeError)(cause)
-    .pipe((result3) => exports_Option.isSome(result3) && result3.value.code === code);
-var projectRootFromModuleUrl = (moduleUrl) => {
-  let directory = dirname(fileURLToPath(moduleUrl));
-  while (basename(directory) !== ".needu") {
-    const parent = dirname(directory);
-    if (parent === directory) throw new Error("Recovery runner is not installed under .needu");
-    directory = parent;
-  }
-  return dirname(directory);
-};
 var projectRootFromCwd = (cwd) => {
   const directory = resolve2(cwd);
   try {
@@ -22675,28 +22531,6 @@ var projectRootFromCwd = (cwd) => {
     return directory;
   }
 };
-var writeReceipt = (projectRoot, receipt) =>
-  exports_Effect.tryPromise({
-    try: async () => {
-      const directory = join2(
-        projectRoot,
-        ".needu",
-        "pending",
-        "receipts",
-        hashFor(receipt.requestId),
-      );
-      await mkdir(directory, { recursive: true });
-      const target = join2(directory, `${randomUUID()}.json`);
-      const temporary = `${target}.${randomUUID()}.tmp`;
-      try {
-        await writeFile(temporary, JSON.stringify(receipt), { flag: "wx", mode: 384 });
-        await rename(temporary, target);
-      } finally {
-        await rm(temporary, { force: true });
-      }
-    },
-    catch: writeFailure,
-  });
 var creationReceipt = exports_Effect.fn("creationReceipt")(function* (input, output, hostSession) {
   if (
     input.requestId !== output.requestId ||
@@ -22717,404 +22551,6 @@ var creationReceipt = exports_Effect.fn("creationReceipt")(function* (input, out
     },
   };
 });
-var recordToolResult = ({
-  projectRoot,
-  host,
-  sessionId,
-  agentId,
-  toolName,
-  toolInput,
-  toolOutput,
-}) =>
-  exports_Effect.gen(function* () {
-    const tool = exports_Schema.decodeUnknownOption(ToolName)(toolName);
-    if (exports_Option.isNone(tool)) return [];
-    const hostSession = yield* exports_Schema
-      .decodeUnknownEffect(HostSessionSchema)(
-        agentId === undefined ? { host, sessionId } : { host, sessionId, agentId },
-      )
-      .pipe(exports_Effect.mapError(writeFailure));
-    let receipt;
-    switch (tool.value) {
-      case "ask_user":
-      case "request_approval": {
-        const input = yield* exports_Schema
-          .decodeUnknownEffect(CreateInput)(toolInput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        const output = yield* exports_Schema
-          .decodeUnknownEffect(CreateOutput)(toolOutput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        receipt = yield* creationReceipt(input, output, hostSession);
-        break;
-      }
-      case "submit_requests": {
-        const input = yield* exports_Schema
-          .decodeUnknownEffect(SubmitInput)(toolInput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        const output = yield* exports_Schema
-          .decodeUnknownEffect(SubmitOutput)(toolOutput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        if (input.requests.length !== output.results.length)
-          return yield* writeFailure(new Error("Needu bulk result count does not match"));
-        const receipts = [];
-        for (const [index2, result3] of output.results.entries()) {
-          const item = input.requests[index2];
-          if (item.requestId !== result3.requestId)
-            return yield* writeFailure(new Error("Needu bulk result identity does not match"));
-          if (result3.status === "submitted")
-            receipts.push(yield* creationReceipt(item, result3.request, hostSession));
-        }
-        for (const item of receipts) yield* writeReceipt(projectRoot, item);
-        return receipts.map((item) => item.requestId);
-      }
-      case "await_answer": {
-        const input = yield* exports_Schema
-          .decodeUnknownEffect(AwaitInput)(toolInput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        const output = yield* exports_Schema
-          .decodeUnknownEffect(AwaitOutput)(toolOutput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        if (input.requestId !== output.requestId)
-          return yield* writeFailure(new Error("Needu tool result cannot be recorded"));
-        const common = {
-          version: 5,
-          kind: "awaited",
-          requestId: output.requestId,
-          currentRevision: output.currentRevision,
-          state: output.state,
-          hostSession,
-        };
-        receipt = output.event === undefined ? common : { ...common, delivery: output.event };
-        break;
-      }
-      case "reply_to_discussion": {
-        const input = yield* exports_Schema
-          .decodeUnknownEffect(ReplyInput)(toolInput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        const output = yield* exports_Schema
-          .decodeUnknownEffect(ReplyOutput)(toolOutput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        if (input.requestId !== output.requestId)
-          return yield* writeFailure(new Error("Needu tool result cannot be recorded"));
-        receipt = {
-          version: 5,
-          kind: "replied",
-          requestId: output.requestId,
-          currentRevision: output.currentRevision,
-          state: output.state,
-          hostSession,
-          inReplyTo: input.inReplyTo,
-          deliveries: output.events,
-        };
-        break;
-      }
-      case "revise_request": {
-        const input = yield* exports_Schema
-          .decodeUnknownEffect(ReviseInput)(toolInput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        const output = yield* exports_Schema
-          .decodeUnknownEffect(ReviseOutput)(toolOutput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        if (
-          input.requestId !== output.requestId ||
-          input.revision.revision !== output.currentRevision ||
-          !output.revisions.some((revision) => revision.revision === input.revision.revision)
-        )
-          return yield* writeFailure(new Error("Needu tool result cannot be recorded"));
-        receipt = {
-          version: 5,
-          kind: "revised",
-          requestId: output.requestId,
-          currentRevision: output.currentRevision,
-          state: output.state,
-          hostSession,
-          revisionCount: output.revisions.length,
-        };
-        break;
-      }
-      case "ack_delivery": {
-        const input = yield* exports_Schema
-          .decodeUnknownEffect(AcknowledgeInput)(toolInput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        const output = yield* exports_Schema
-          .decodeUnknownEffect(AcknowledgeOutput)(toolOutput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        if (input.requestId !== output.requestId || input.cursor !== output.acknowledgedCursor)
-          return yield* writeFailure(new Error("Needu tool result cannot be recorded"));
-        receipt = {
-          version: 5,
-          kind: "acknowledged",
-          requestId: output.requestId,
-          currentRevision: output.currentRevision,
-          state: output.state,
-          hostSession,
-          acknowledgedCursor: output.acknowledgedCursor,
-        };
-        break;
-      }
-      case "cancel_request": {
-        const input = yield* exports_Schema
-          .decodeUnknownEffect(CancelInput)(toolInput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        const output = yield* exports_Schema
-          .decodeUnknownEffect(CancelOutput)(toolOutput)
-          .pipe(exports_Effect.mapError(writeFailure));
-        if (input.requestId !== output.requestId || input.revision !== output.currentRevision)
-          return yield* writeFailure(new Error("Needu tool result cannot be recorded"));
-        receipt = {
-          version: 5,
-          kind: "cancelled",
-          requestId: output.requestId,
-          currentRevision: output.currentRevision,
-          state: output.state,
-          hostSession,
-        };
-        break;
-      }
-    }
-    yield* writeReceipt(projectRoot, receipt);
-    return [receipt.requestId];
-  });
-var readBuffer = (path) =>
-  exports_Effect.tryPromise({ try: () => readFile(path), catch: readFailure });
-var readText = (path) =>
-  exports_Effect.tryPromise({ try: () => readFile(path, "utf8"), catch: readFailure });
-var removePath = (path) => exports_Effect.tryPromise({ try: () => rm(path), catch: readFailure });
-var makeDirectory = (path) =>
-  exports_Effect.tryPromise({ try: () => mkdir(path, { recursive: true }), catch: readFailure });
-var readEntries = (path) =>
-  exports_Effect.tryPromise({
-    try: async () => {
-      try {
-        return await readdir(path, { withFileTypes: true });
-      } catch (cause) {
-        if (isCode(cause, "ENOENT")) return [];
-        throw cause;
-      }
-    },
-    catch: readFailure,
-  });
-var readNames = (path) =>
-  exports_Effect.tryPromise({
-    try: async () => {
-      try {
-        return await readdir(path);
-      } catch (cause) {
-        if (isCode(cause, "ENOENT")) return [];
-        throw cause;
-      }
-    },
-    catch: readFailure,
-  });
-var installExact = (target, contents) =>
-  exports_Effect.tryPromise({
-    try: async () => {
-      await mkdir(join2(target, ".."), { recursive: true });
-      const temporary = `${target}.${randomUUID()}.tmp`;
-      try {
-        await writeFile(temporary, contents, { flag: "wx", mode: 384 });
-        try {
-          await link2(temporary, target);
-        } catch (cause) {
-          if (!isCode(cause, "EEXIST")) throw cause;
-        }
-      } finally {
-        await rm(temporary, { force: true });
-      }
-      const copied = await readFile(target);
-      if (!copied.equals(contents)) throw new Error("conflicting migrated receipt");
-    },
-    catch: readFailure,
-  });
-var copyBeforeDelete = (source, target, transform3 = exports_Effect.succeed) =>
-  exports_Effect.gen(function* () {
-    const contents = yield* readBuffer(source);
-    const transformed = yield* transform3(contents);
-    yield* installExact(target, transformed);
-    yield* removePath(source);
-  });
-var migrateCodexLedger = (projectRoot) =>
-  exports_Effect.gen(function* () {
-    const legacyRoot = join2(projectRoot, ".codex", "needu-pending");
-    const entries3 = yield* readEntries(legacyRoot);
-    yield* exports_Effect.forEach(
-      entries3.filter((entry) => entry.isFile() && entry.name.endsWith(".json")),
-      (entry) =>
-        copyBeforeDelete(
-          join2(legacyRoot, entry.name),
-          join2(projectRoot, ".needu", "pending", `codex-${entry.name}`),
-        ),
-      { concurrency: 1, discard: true },
-    );
-    const legacyReceipts = join2(legacyRoot, "receipts");
-    const directories = (yield* readEntries(legacyReceipts)).filter((entry) => entry.isDirectory());
-    yield* exports_Effect.forEach(
-      directories,
-      (directory) =>
-        exports_Effect.gen(function* () {
-          const files = (yield* readNames(join2(legacyReceipts, directory.name))).filter((name) =>
-            name.endsWith(".json"),
-          );
-          yield* exports_Effect.forEach(
-            files,
-            (file) =>
-              copyBeforeDelete(
-                join2(legacyReceipts, directory.name, file),
-                join2(
-                  projectRoot,
-                  ".needu",
-                  "pending",
-                  "receipts",
-                  directory.name,
-                  `codex-${file}`,
-                ),
-                (contents) =>
-                  exports_Effect.gen(function* () {
-                    const value3 = yield* decodeJson(contents.toString("utf8")).pipe(
-                      exports_Effect.mapError(readFailure),
-                    );
-                    yield* decodeReceipt(value3).pipe(exports_Effect.mapError(readFailure));
-                    return contents;
-                  }),
-              ),
-            { concurrency: 1, discard: true },
-          );
-        }),
-      { concurrency: 1, discard: true },
-    );
-  });
-var hasLegacyState = (projectRoot) =>
-  exports_Effect.gen(function* () {
-    const legacyRoot = join2(projectRoot, ".codex", "needu-pending");
-    const entries3 = yield* readEntries(legacyRoot);
-    if (entries3.some((entry) => entry.isFile() && entry.name.endsWith(".json"))) return true;
-    const directories = (yield* readEntries(join2(legacyRoot, "receipts"))).filter((entry) =>
-      entry.isDirectory(),
-    );
-    const results = yield* exports_Effect.forEach(directories, (directory) =>
-      readNames(join2(legacyRoot, "receipts", directory.name)).pipe(
-        exports_Effect.map((files) => files.some((file) => file.endsWith(".json"))),
-      ),
-    );
-    return results.some(Boolean);
-  });
-var legacyReceipts = (pointer) =>
-  exports_Effect.gen(function* () {
-    const revision = pointer.revision ?? pointer.currentRevision;
-    if (revision === undefined)
-      return yield* readFailure(new Error("Legacy pointer revision is missing"));
-    const state = pointer.state ?? "waiting_human";
-    const receipts = [
-      {
-        version: 3,
-        requestId: pointer.requestId,
-        currentRevision: revision,
-        state,
-        kind: "created",
-        hostSessionId: pointer.hostSessionId,
-        sourceSessionId: pointer.sourceSessionId,
-        initialRevision: revision,
-        revisionCount: 1,
-      },
-    ];
-    if (pointer.version === 2 && pointer.acknowledgedCursor > 0)
-      receipts.push({
-        version: 3,
-        requestId: pointer.requestId,
-        currentRevision: revision,
-        state,
-        kind: "acknowledged",
-        acknowledgedCursor: pointer.acknowledgedCursor,
-      });
-    if (pointer.version === 2 && pointer.deliveredCursor !== undefined) {
-      if (
-        pointer.deliveredKind === undefined ||
-        pointer.deliveredCursor <= pointer.acknowledgedCursor
-      )
-        return yield* readFailure(new Error("invalid legacy delivery"));
-      const delivery = {
-        cursor: pointer.deliveredCursor,
-        kind: pointer.deliveredKind,
-        revision,
-      };
-      receipts.push({
-        version: 3,
-        requestId: pointer.requestId,
-        currentRevision: revision,
-        state,
-        kind: "awaited",
-        delivery,
-      });
-    }
-    return receipts;
-  });
-var migratePointers = (pendingRoot) =>
-  exports_Effect.gen(function* () {
-    const files = (yield* readNames(pendingRoot)).filter((file) => file.endsWith(".json"));
-    yield* exports_Effect.forEach(
-      files,
-      (file) =>
-        exports_Effect.gen(function* () {
-          const raw = yield* readText(join2(pendingRoot, file));
-          const value3 = yield* decodeJson(raw).pipe(exports_Effect.mapError(readFailure));
-          const pointer = yield* decodeLegacyPointer(value3).pipe(
-            exports_Effect.mapError(readFailure),
-          );
-          const receipts = yield* legacyReceipts(pointer);
-          const directory = join2(pendingRoot, "receipts", hashFor(pointer.requestId));
-          yield* makeDirectory(directory);
-          yield* exports_Effect.forEach(
-            receipts,
-            (receipt, index2) =>
-              installExact(
-                join2(
-                  directory,
-                  `pointer-${createHash2("sha256").update(file).digest("hex")}-${index2}.json`,
-                ),
-                Buffer.from(JSON.stringify(receipt)),
-              ),
-            { concurrency: 1, discard: true },
-          );
-          yield* removePath(join2(pendingRoot, file));
-        }),
-      { concurrency: 1, discard: true },
-    );
-  });
-var loadPending = (projectRoot, { migrate = false } = {}) =>
-  exports_Effect.gen(function* () {
-    const pendingRoot = join2(projectRoot, ".needu", "pending");
-    if (migrate) yield* migrateCodexLedger(projectRoot);
-    else if (yield* hasLegacyState(projectRoot))
-      return yield* readFailure(new Error("unmigrated legacy state"));
-    if (!migrate) {
-      const neutralEntries = yield* readNames(pendingRoot);
-      if (neutralEntries.some((file) => file.endsWith(".json")))
-        return yield* readFailure(new Error("unreduced legacy pointer"));
-    }
-    if (migrate) {
-      yield* makeDirectory(join2(pendingRoot, "receipts"));
-      yield* migratePointers(pendingRoot);
-    }
-    const directories = yield* readNames(join2(pendingRoot, "receipts"));
-    const values2 = yield* exports_Effect.forEach(directories, (name) =>
-      exports_Effect.gen(function* () {
-        const directory = join2(pendingRoot, "receipts", name);
-        const files = (yield* readNames(directory)).filter((file) => file.endsWith(".json"));
-        const receipts = yield* exports_Effect.forEach(files, (file) =>
-          exports_Effect.gen(function* () {
-            const raw = yield* readText(join2(directory, file));
-            const value3 = yield* decodeJson(raw).pipe(exports_Effect.mapError(readFailure));
-            return yield* decodeReceipt(value3).pipe(exports_Effect.mapError(readFailure));
-          }),
-        );
-        return yield* exports_Effect.try({
-          try: () => reduceReceipts(name, receipts),
-          catch: readFailure,
-        });
-      }),
-    );
-    return values2.filter((value3) => value3 !== undefined);
-  });
 var CodexGuardPointerSchema = exports_Schema.Struct({
   version: exports_Schema.Literal(1),
   sessionId: Identifier2,
@@ -23122,155 +22558,35 @@ var CodexGuardPointerSchema = exports_Schema.Struct({
   agentId: exports_Schema.optionalKey(Identifier2),
   requestId: Identifier2,
 });
-var guardFailure = (cause) => new CodexGuardStateError({ cause });
-var codexGuardSessionPath = ({ pluginData, projectRoot, sessionId, agentId }) =>
-  join2(
-    pluginData,
-    "wait-cycles",
-    createHash2("sha256")
-      .update(projectRoot)
-      .update("\x00")
-      .update(sessionId)
-      .update(agentId === undefined ? "" : `\x00${agentId}`)
-      .digest("hex"),
-  );
-var codexGuardCyclePath = (context3) =>
-  join2(
-    codexGuardSessionPath(context3),
-    createHash2("sha256").update(context3.turnId).digest("hex"),
-  );
-var codexGuardRequestPath = (context3, requestId) =>
-  join2(codexGuardCyclePath(context3), `${hashFor(requestId)}.json`);
-var writeCodexGuard = (context3, requestId) =>
-  exports_Effect.tryPromise({
-    try: async () => {
-      const target = codexGuardRequestPath(context3, requestId);
-      await mkdir(dirname(target), { recursive: true, mode: 448 });
-      const temporary = `${target}.${randomUUID()}.tmp`;
-      try {
-        let pointer = {
-          version: 1,
-          sessionId: context3.sessionId,
-          turnId: context3.turnId,
-          requestId,
-        };
-        if (context3.agentId !== undefined) pointer = { ...pointer, agentId: context3.agentId };
-        await writeFile(
-          temporary,
-          JSON.stringify(exports_Schema.decodeUnknownSync(CodexGuardPointerSchema)(pointer)),
-          { flag: "wx", mode: 384 },
-        );
-        await rename(temporary, target);
-      } finally {
-        await rm(temporary, { force: true });
-      }
-    },
-    catch: guardFailure,
-  });
-var ownedPendingRequest = (pending, context3, requestId) =>
-  pending.find(
-    (entry) =>
-      entry.requestId === requestId &&
-      entry.hostSessions.some(
-        (hostSession) =>
-          hostSession.host === "codex" &&
-          hostSession.sessionId === context3.sessionId &&
-          hostSession.agentId === context3.agentId,
-      ),
-  );
-var refreshCodexGuard = (context3, requestId) =>
-  exports_Effect.gen(function* () {
-    const pending = yield* loadPending(context3.projectRoot);
-    const entry = ownedPendingRequest(pending, context3, requestId);
-    if (entry === undefined) {
-      yield* removeCodexGuardRequest(context3, requestId);
-      return;
-    }
-    yield* writeCodexGuard(context3, requestId);
-    return entry;
-  });
-var removeCodexGuardRequest = (context3, requestId) =>
-  exports_Effect.tryPromise({
-    try: () => rm(codexGuardRequestPath(context3, requestId), { force: true }),
-    catch: guardFailure,
-  });
 
-// packages/needu-recovery/src/codex-post-tool-capture.mts
-var TextContent = exports_Schema.Struct({
-  type: exports_Schema.Literal("text"),
-  text: exports_Schema.String,
-});
+// packages/needu-recovery/src/claude-pre-tool-source.mts
 var Event = exports_Schema.Struct({
-  session_id: exports_Schema.String,
-  agent_id: exports_Schema.optionalKey(exports_Schema.String),
-  turn_id: exports_Schema.optionalKey(exports_Schema.String),
+  hook_event_name: exports_Schema.Literal("PreToolUse"),
+  session_id: exports_Schema.NonEmptyString,
   cwd: exports_Schema.optionalKey(exports_Schema.String),
   tool_name: exports_Schema.String,
-  tool_input: exports_Schema.Unknown,
-  tool_response: exports_Schema.Struct({
-    isError: exports_Schema.optional(exports_Schema.Boolean),
-    content: exports_Schema.Array(exports_Schema.Unknown),
-    structuredContent: exports_Schema.optionalKey(exports_Schema.Unknown),
-  }),
+  tool_input: ClaudeToolInput,
 });
 var input = "";
 for await (const chunk of process.stdin) input += chunk;
-var guardContext;
 try {
   const event = exports_Schema.decodeUnknownSync(Event)(JSON.parse(input));
-  const pluginData = process.env.PLUGIN_DATA;
-  const pluginRoot = process.env.PLUGIN_ROOT;
-  const projectRoot =
-    pluginData !== undefined && pluginRoot !== undefined && event.cwd !== undefined
-      ? projectRootFromCwd(event.cwd)
-      : projectRootFromModuleUrl(import.meta.url);
-  if (pluginData !== undefined && event.turn_id !== undefined)
-    guardContext = {
-      pluginData,
-      projectRoot,
-      sessionId: event.session_id,
-      turnId: event.turn_id,
-    };
-  if (guardContext !== undefined && event.agent_id !== undefined)
-    guardContext = { ...guardContext, agentId: event.agent_id };
-  if (event.tool_response.isError === true) process.exit(0);
-  const toolName = /^mcp__(?:plugin_needu_needu|needu)__(.+)$/.exec(event.tool_name)?.[1];
+  const toolName = /^mcp__plugin_needu_needu__(ask_user|request_approval|submit_requests)$/.exec(
+    event.tool_name,
+  )?.[1];
   if (toolName === undefined) process.exit(0);
-  const structured = event.tool_response.structuredContent;
-  const toolOutput =
-    structured === undefined
-      ? JSON.parse(
-          event.tool_response.content
-            .map((item) => exports_Schema.decodeUnknownOption(TextContent)(item))
-            .find(exports_Option.isSome)?.value.text ?? "",
-        )
-      : structured;
-  const record2 = {
-    projectRoot,
-    host: "codex",
-    sessionId: event.session_id,
+  const projectRoot = projectRootFromCwd(event.cwd ?? process.cwd());
+  const title = await readClaudeSessionTitle(projectRoot, event.session_id);
+  const updatedInput = stampClaudeRequestSource(
     toolName,
-    toolInput: event.tool_input,
-    toolOutput,
-  };
-  const requestIds = await exports_Effect.runPromise(
-    recordToolResult(
-      event.agent_id === undefined ? record2 : { ...record2, agentId: event.agent_id },
-    ),
+    event.tool_input,
+    event.session_id,
+    title,
   );
-  if (guardContext !== undefined) {
-    const context3 = guardContext;
-    await exports_Effect.runPromise(
-      exports_Effect.forEach(requestIds, (requestId) => refreshCodexGuard(context3, requestId), {
-        discard: true,
-      }),
+  if (updatedInput !== undefined)
+    process.stdout.write(
+      JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", updatedInput } }),
     );
-  }
 } catch {
-  process.stdout.write(
-    JSON.stringify({
-      systemMessage:
-        "Needu could not record this tool result. Existing pending requests remain saved; recover the same request before continuing.",
-    }),
-  );
+  process.exit(0);
 }
