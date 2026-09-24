@@ -6,8 +6,10 @@ description: Use when you need to ask the user a question, obtain approval for a
 # Needu approvals
 
 Use the connected Needu MCP tools for human decisions. Check the available tool
-list first. If Needu is unavailable, use the host's native question tool or chat to collect
-the human decision. Keep dependent work blocked until they answer. This skill does not configure the MCP server.
+list first. If Needu cannot be reached, report the connection problem in chat and
+keep dependent work blocked. Recover any saved Needu request when the connection
+returns. Ask in another channel only if the person explicitly chooses it. This
+skill does not configure the MCP server.
 
 ## Decide whether to ask
 
@@ -112,6 +114,12 @@ is waiting, use `reply_to_discussion` with an amendment instead. A new question
 revision or amendment has its own options and `recommendedOptionId`; choose the ID
 again if you still recommend an option. Never reuse an approved revision for changed work.
 
+If a submission fails or its response is lost, its outcome is unknown. Keep its
+original request ID, key, and content. After reconnecting, use `get_request` to
+check that ID, or retry the identical submission with the same key. Preserve any
+request that already exists. An authentication error does not authorize a new
+request or another question channel.
+
 If the human requests changes, the request remains open in `waiting_agent`. Treat
 the feedback as discussion, reply on the same request with `reply_to_discussion`,
 and include an amendment when the proposed content changed. The amendment creates
@@ -152,10 +160,17 @@ replacement agent does not inherit the original creation receipt or its Stop
 guard. Keep dependent work blocked and do not claim that a pending request will
 restart an exited host.
 
-After temporary connection errors, retry the existing request with a delay starting
-at 1 second and doubling up to 60 seconds. A disconnected delivery does not cancel
-the request. If authentication or access requires human action, report the problem
-and preserve the request for recovery. Never retry a revoked connection indefinitely.
+If `await_answer` returns `kind: retry_required` with
+`reason: access_token_expired`, it delivered no conversation event. Do not call
+`ack_delivery` or invent a cursor. Call `await_answer` again for that same
+request ID in a fresh MCP call.
+The new HTTP request can use the host's normal authentication flow. It may need
+the person's help; do not assume an automatic refresh. If authentication still
+fails, report the problem and ask the person to reconnect through the host.
+After a temporary transport error, retry the same request with a delay starting
+at 1 second and doubling up to 60 seconds. A disconnected delivery does not
+cancel the request. Treat a continuing transport error as an outage and keep
+the request for recovery. Never retry a revoked connection indefinitely.
 
 ## Find a request after switching connections
 
@@ -223,5 +238,6 @@ An agent OAuth grant can submit and read requests. It cannot approve its own wor
 The human browser-session holder completes Needu OAuth and MCP consent. Never
 request, display, copy, or persist an access token, refresh token, client secret, or
 registration token. If the MCP connection is missing or revoked, explain that the
-user can reconnect it through the supported host flow. Use native questions or
-chat while disconnected; an unavailable service never supplies approval.
+user can reconnect it through the supported host flow. Keep Needu decisions in
+Needu unless the person explicitly chooses another channel. A disconnected
+service never supplies approval.

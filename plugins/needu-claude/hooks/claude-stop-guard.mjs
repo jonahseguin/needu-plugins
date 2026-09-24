@@ -22291,6 +22291,7 @@ function reduceReceipts(directoryName, receipts) {
   );
   const deliveries = receipts
     .flatMap((receipt) => {
+      if (receipt.kind === "observed") return [receipt.delivery];
       if (receipt.kind === "awaited")
         return receipt.delivery === undefined ? [] : [receipt.delivery];
       return receipt.kind === "replied" ? receipt.deliveries : [];
@@ -22442,6 +22443,11 @@ var AwaitedV5 = exports_Schema.Struct({
   kind: exports_Schema.Literal("awaited"),
   delivery: exports_Schema.optionalKey(DeliverySchema),
 });
+var ObservedV5 = exports_Schema.Struct({
+  ...ReceiptV5Common,
+  kind: exports_Schema.Literal("observed"),
+  delivery: DeliverySchema,
+});
 var RepliedLegacy = exports_Schema.Struct({
   ...LegacyReceiptCommon,
   kind: exports_Schema.Literal("replied"),
@@ -22485,6 +22491,7 @@ var ReceiptSchema = exports_Schema.Union([
   CreatedV5,
   AwaitedLegacy,
   AwaitedV5,
+  ObservedV5,
   RepliedLegacy,
   RepliedV5,
   RevisedV5,
@@ -22627,9 +22634,18 @@ var SubmitOutput = exports_Schema.Struct({
   ),
 });
 var AwaitInput = exports_Schema.Struct(BaseInput);
-var AwaitOutput = exports_Schema.Struct({
+var AwaitOutput = exports_Schema.Union([
+  exports_Schema.Struct({ ...BaseOutput, event: exports_Schema.optionalKey(DeliverySchema) }),
+  exports_Schema.Struct({
+    kind: exports_Schema.Literal("retry_required"),
+    reason: exports_Schema.Literal("access_token_expired"),
+    requestId: Identifier2,
+  }),
+]);
+var GetOutput = exports_Schema.Struct({
   ...BaseOutput,
-  event: exports_Schema.optionalKey(DeliverySchema),
+  decision: exports_Schema.optionalKey(exports_Schema.Struct({ revision: Identifier2 })),
+  events: exports_Schema.Array(DeliverySchema),
 });
 var ReplyInput = exports_Schema.Struct({ ...BaseInput, inReplyTo: Cursor2 });
 var ReplyOutput = exports_Schema.Struct({
@@ -22648,6 +22664,7 @@ var ToolName = exports_Schema.Literals([
   "ask_user",
   "request_approval",
   "submit_requests",
+  "get_request",
   "await_answer",
   "reply_to_discussion",
   "revise_request",

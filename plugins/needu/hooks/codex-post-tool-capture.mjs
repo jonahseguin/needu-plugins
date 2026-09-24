@@ -22281,6 +22281,7 @@ function reduceReceipts(directoryName, receipts) {
   );
   const deliveries = receipts
     .flatMap((receipt) => {
+      if (receipt.kind === "observed") return [receipt.delivery];
       if (receipt.kind === "awaited")
         return receipt.delivery === undefined ? [] : [receipt.delivery];
       return receipt.kind === "replied" ? receipt.deliveries : [];
@@ -22432,6 +22433,11 @@ var AwaitedV5 = exports_Schema.Struct({
   kind: exports_Schema.Literal("awaited"),
   delivery: exports_Schema.optionalKey(DeliverySchema),
 });
+var ObservedV5 = exports_Schema.Struct({
+  ...ReceiptV5Common,
+  kind: exports_Schema.Literal("observed"),
+  delivery: DeliverySchema,
+});
 var RepliedLegacy = exports_Schema.Struct({
   ...LegacyReceiptCommon,
   kind: exports_Schema.Literal("replied"),
@@ -22475,6 +22481,7 @@ var ReceiptSchema = exports_Schema.Union([
   CreatedV5,
   AwaitedLegacy,
   AwaitedV5,
+  ObservedV5,
   RepliedLegacy,
   RepliedV5,
   RevisedV5,
@@ -22617,9 +22624,18 @@ var SubmitOutput = exports_Schema.Struct({
   ),
 });
 var AwaitInput = exports_Schema.Struct(BaseInput);
-var AwaitOutput = exports_Schema.Struct({
+var AwaitOutput = exports_Schema.Union([
+  exports_Schema.Struct({ ...BaseOutput, event: exports_Schema.optionalKey(DeliverySchema) }),
+  exports_Schema.Struct({
+    kind: exports_Schema.Literal("retry_required"),
+    reason: exports_Schema.Literal("access_token_expired"),
+    requestId: Identifier2,
+  }),
+]);
+var GetOutput = exports_Schema.Struct({
   ...BaseOutput,
-  event: exports_Schema.optionalKey(DeliverySchema),
+  decision: exports_Schema.optionalKey(exports_Schema.Struct({ revision: Identifier2 })),
+  events: exports_Schema.Array(DeliverySchema),
 });
 var ReplyInput = exports_Schema.Struct({ ...BaseInput, inReplyTo: Cursor2 });
 var ReplyOutput = exports_Schema.Struct({
@@ -22639,6 +22655,7 @@ var ToolName = exports_Schema.Literals([
   "ask_user",
   "request_approval",
   "submit_requests",
+  "get_request",
   "await_answer",
   "reply_to_discussion",
   "revise_request",
@@ -22767,6 +22784,47 @@ var recordToolResult = ({
         for (const item of receipts) yield* writeReceipt(projectRoot, item);
         return receipts.map((item) => item.requestId);
       }
+      case "get_request": {
+        const input = yield* exports_Schema
+          .decodeUnknownEffect(AwaitInput)(toolInput)
+          .pipe(exports_Effect.mapError(writeFailure));
+        const output = yield* exports_Schema
+          .decodeUnknownEffect(GetOutput)(toolOutput)
+          .pipe(exports_Effect.mapError(writeFailure));
+        if (input.requestId !== output.requestId)
+          return yield* writeFailure(new Error("Needu tool result cannot be recorded"));
+        const pending = (yield* loadPending(projectRoot).pipe(
+          exports_Effect.mapError(writeFailure),
+        )).find(
+          (entry) =>
+            entry.requestId === output.requestId &&
+            entry.hostSessions.some(
+              (owner) =>
+                owner.host === hostSession.host &&
+                owner.sessionId === hostSession.sessionId &&
+                owner.agentId === hostSession.agentId,
+            ),
+        );
+        if (pending === undefined || output.state !== "decided" || output.decision === undefined)
+          return [];
+        const decisions = output.events.filter((event) => event.kind === "decision");
+        if (
+          decisions.length !== 1 ||
+          decisions[0].revision !== output.decision.revision ||
+          decisions[0].revision !== output.currentRevision
+        )
+          return yield* writeFailure(new Error("Needu decision event cannot be recorded"));
+        receipt = {
+          version: 5,
+          kind: "observed",
+          requestId: output.requestId,
+          currentRevision: output.currentRevision,
+          state: output.state,
+          hostSession,
+          delivery: decisions[0],
+        };
+        break;
+      }
       case "await_answer": {
         const input = yield* exports_Schema
           .decodeUnknownEffect(AwaitInput)(toolInput)
@@ -22776,6 +22834,7 @@ var recordToolResult = ({
           .pipe(exports_Effect.mapError(writeFailure));
         if (input.requestId !== output.requestId)
           return yield* writeFailure(new Error("Needu tool result cannot be recorded"));
+        if ("kind" in output) return [];
         const common = {
           version: 5,
           kind: "awaited",
