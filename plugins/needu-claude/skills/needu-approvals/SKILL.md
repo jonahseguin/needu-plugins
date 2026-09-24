@@ -21,6 +21,30 @@ and `request_approval` for a proposed plan. Honor an explicit request to answer 
 chat instead. Keep the host's own tool permission prompts intact. Follow
 the fields and validation rules in the current MCP tool definition.
 
+## Choose the wait owner before submitting
+
+When the host can run a background subagent with Needu MCP tools, give it the
+complete decision context and have it own the request by default. This keeps the
+main conversation available for new instructions, even when it has no other work.
+The subagent creates the request, saves its ID, key and revision, starts
+`await_answer`, records each event before acknowledging its cursor, and reports
+the exact decision and revision to the main agent. One subagent can own an entire
+batch only when that host can start its separate waits concurrently. Otherwise,
+give each independent request to a separate background subagent that submits and
+waits for its own item. The main agent does not start a second wait or act
+on work that needs the answer before the saved decision reaches it. Keep the
+lead task open and do not send a final response until the subagent reports the
+saved decision, unless the human explicitly stops waiting or withdraws the
+request. Accept new instructions during the background wait.
+
+If background subagents or their Needu MCP tools are unavailable, the current
+agent owns creation and delivery. Use a native background handoff for that same
+MCP wait when the host actually supports it; otherwise wait in the foreground.
+Keep the original owner when a request already exists. Moving only the wait to a
+new subagent does not move the creation receipt or its Stop guard. Keep the task
+open until this owner has saved and acknowledged the answer, unless the human
+explicitly stops waiting or withdraws the request.
+
 ## Make a request someone can decide
 
 State the decision needed, the relevant facts, and what happens after each option.
@@ -49,7 +73,10 @@ revision.
 ## Submit independent decisions together
 
 When several decisions are ready and none depends on another answer, use
-`submit_requests` with a `requests` array. Supply the complete creation fields for
+`submit_requests` with a `requests` array if one owner can start every wait
+concurrently. Otherwise give each item to its own background subagent for
+separate submission and delivery; do not have the lead submit a batch and hand
+its waits to other agents. Supply the complete creation fields for
 each item, including its explicit kind, unique request ID, idempotency key and
 revision. Set `recommendedOptionId` against that item's options when you recommend
 a choice on a question item. Save those identities before submitting. Follow the tool's
@@ -63,7 +90,9 @@ action. An item marked failed may still have committed before delivery failed, s
 preserve its identity when retrying.
 
 Start a separate `await_answer` for every pending successful request. Use concurrent
-calls where the host supports them; otherwise start each as the host allows.
+calls for a batch; if the host cannot start them concurrently, use separate owners
+for future independent requests rather than assuming sequential waits deliver
+every answer promptly.
 Submitting a batch is not waiting. Do not end with a summary that requests are
 "waiting on you" before starting these calls, even when the preceding audit or
 other independent work is finished.
@@ -111,14 +140,17 @@ or host restart, call `await_answer` again with the saved request ID. Recover an
 handle any event whose cursor was not acknowledged. Keep dependent work blocked until
 an explicit saved decision arrives. Silence never grants approval.
 
-### One owner per wait
+### Resume the owner
 
-Use a subagent for the request and wait only when the main agent has independent,
-already-authorized work to continue. Have that same subagent create the request,
-wait, save the returned event, acknowledge it, and report the exact decision and
-revision to the parent. Do not run a second wait for the same request in the parent.
-The parent must keep dependent work blocked until it receives the saved decision.
-If all remaining work depends on the answer, wait in the main agent.
+If a background subagent times out or stops, resume that same subagent and its
+saved request when the host supports it. Before another agent waits, confirm the
+original wait is no longer active. Recover the same request through `get_request`
+or `list_requests`, preserve its ID, revision and latest acknowledged cursor,
+then call `await_answer` and record the new wait owner. If the original wait's
+state is unknown, do not start a second wait; report the delivery problem. A
+replacement agent does not inherit the original creation receipt or its Stop
+guard. Keep dependent work blocked and do not claim that a pending request will
+restart an exited host.
 
 After temporary connection errors, retry the existing request with a delay starting
 at 1 second and doubling up to 60 seconds. A disconnected delivery does not cancel
@@ -138,12 +170,14 @@ acknowledging it. Listing and reading never acknowledge an event.
 
 ### Claude waits
 
-Claude Code can move a long main-conversation MCP call to the background and deliver
-its result to the same running session. When Claude reports that a wait is still
-running in the background, leave that call running; do not start another wait.
-Subagent calls remain foreground waits. Save and acknowledge the event when it
-arrives. If Claude exits, recover the existing request on resume; a pending Needu
-request alone cannot restart Claude. Honor an explicit request to stop waiting.
+In interactive Claude Code, prefer a background subagent that can use the Needu
+MCP tools and owns creation through acknowledgement. Its result reaches the main
+conversation after it finishes. Claude can also move a long main-conversation MCP
+call to the background and deliver its result to the same running session. If
+Claude reports that handoff, leave that call running without starting another
+wait. Save and acknowledge the event when it arrives. If Claude exits, recover
+the existing request on resume; a pending Needu request alone cannot restart
+Claude. Honor an explicit request to stop waiting.
 
 The Claude plugin checks that successful submissions in the current prompt have
 started an `await_answer` call before Claude stops. A failed tool call does not
@@ -154,10 +188,15 @@ new prompt does not cancel any Needu request.
 
 ### Codex waits
 
-In Codex, an `await_answer` tool call can leave its `functions.exec` cell running.
-`Script running with cell ID ...` means Needu is still waiting. Keep that same cell
-alive with `functions.wait` and `terminate: false`; do not terminate it because a
-minute has passed. Do not return a final response while the request remains pending.
+In Codex, prefer a background subagent that can use the Needu MCP tools and owns
+creation through acknowledgement. If that is unavailable and the current agent
+owns the request, an `await_answer` tool call can leave its `functions.exec` cell
+running. `Script running with cell ID ...` means Needu is still waiting. Keep
+that same cell alive with `functions.wait` and `terminate: false`; do not
+terminate it because a minute has passed. Do not close the lead task while its
+child is waiting. The lead can take new instructions during the background
+wait; the child reports success only after it saves the decision and
+acknowledges its cursor.
 
 If the tool call times out or disconnects, keep the request open and call
 `await_answer` again with the saved request ID. Do not create another request, change

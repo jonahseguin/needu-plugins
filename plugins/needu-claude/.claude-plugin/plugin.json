@@ -1,6 +1,6 @@
 {
   "name": "needu",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Ask for human decisions and recover pending Needu requests.",
   "author": {
     "name": "Needu",
