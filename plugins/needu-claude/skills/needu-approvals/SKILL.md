@@ -11,6 +11,25 @@ keep dependent work blocked. Recover any saved Needu request when the connection
 returns. Ask in another channel only if the person explicitly chooses it. This
 skill does not configure the MCP server.
 
+## Update the plugin only when asked
+
+If the person explicitly asks to update Needu, first identify this host and inspect
+its installed version with `claude plugin list --json` or `codex plugin list --json`.
+With local plugin-management access, update the matching host only:
+
+- Claude Code CLI: `claude plugin marketplace update needu`, then
+  `claude plugin update needu@needu`.
+- Codex CLI: `codex plugin marketplace upgrade needu`, then
+  `codex plugin add needu@needu`.
+
+Check the installed version again. Start a fresh session or task, call
+`connection_status`, and compare its advisory `reportedPlugin` value with the
+installed version. Review any changed Needu hooks in that host. An older open task
+may still report its previously loaded plugin; do not interrupt it. If this agent cannot
+manage local plugins, give the person these host-specific steps instead. Needu
+MCP tools cannot install a plugin on the person's computer. Never update on an
+unsolicited version notice.
+
 ## Decide whether to ask
 
 Proceed with work the person has already authorized. Ask when a decision needs human

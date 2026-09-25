@@ -1,6 +1,6 @@
 {
   "name": "needu",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "A durable decision and approval inbox for coding agents.",
   "author": {
     "name": "Needu",
