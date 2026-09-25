@@ -10,7 +10,7 @@
       "name": "needu",
       "source": "./plugins/needu-claude",
       "description": "Ask for human decisions and recover pending Needu requests.",
-      "version": "0.1.8",
+      "version": "0.1.9",
       "category": "Productivity"
     }
   ]

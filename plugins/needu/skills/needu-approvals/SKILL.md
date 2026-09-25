@@ -197,9 +197,11 @@ Claude. Honor an explicit request to stop waiting.
 The Claude plugin checks that successful submissions in the current prompt have
 started an `await_answer` call before Claude stops. A failed tool call does not
 satisfy that check. A successful call, including Claude's native background handoff,
-does. This check does not prove an answer has arrived or been saved. Continue the
-save-and-acknowledge steps above when it arrives. Interrupting Claude or sending a
-new prompt does not cancel any Needu request.
+does until a later `retry_required` result or failed wait reopens it. The same
+agent must call `await_answer` again with the same request ID. This check does not
+prove an answer has arrived or been saved. Continue the save-and-acknowledge
+steps above when it arrives. Interrupting Claude or sending a new prompt does
+not cancel any Needu request.
 
 ### Codex waits
 

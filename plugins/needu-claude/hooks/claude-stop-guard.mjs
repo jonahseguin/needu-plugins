@@ -23071,7 +23071,7 @@ try {
         ? {}
         : {
             decision: "block",
-            reason: `Needu requests created in this prompt have not started waiting: ${JSON.stringify(pending)}. Call Needu await_answer for every listed request before finishing. Independent work being complete does not remove this step. If Claude moves a wait to the background, leave that native wait running and do not duplicate it. After a temporary failure, retry with a delay. If authentication or access needs human action, explain it and ask the user to reconnect or interrupt. Never infer or create a human answer.`,
+            reason: `Needu requests created in this prompt still need an active wait: ${JSON.stringify(pending)}. Call Needu await_answer with each same request ID before finishing. Independent work being complete does not remove this step. If Claude moves a wait to the background, leave that native wait running and do not duplicate it. After retry_required, make a fresh await_answer call; after a temporary transport failure, retry with a delay. If authentication or access needs human action, explain it and ask the user to reconnect or interrupt. Never infer or create a human answer.`,
           },
     ),
   );

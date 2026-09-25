@@ -23243,6 +23243,12 @@ var writeMarker = (context3, requestId, kind) =>
   });
 var armClaudeWait = (context3, requestId) => writeMarker(context3, requestId, "created");
 var completeClaudeWaitStart = (context3, requestId) => writeMarker(context3, requestId, "started");
+var requireClaudeWaitStart = (context3, requestId) =>
+  exports_Effect.tryPromise({
+    try: () =>
+      rm2(join3(cyclePath(context3), `${hashFor(requestId)}.started.json`), { force: true }),
+    catch: failure,
+  });
 var readMarkers = (context3) =>
   exports_Effect.tryPromise({
     try: async () => {
@@ -23306,17 +23312,32 @@ var TextContent = exports_Schema.Struct({
   type: exports_Schema.Literal("text"),
   text: exports_Schema.String,
 });
-var Event = exports_Schema.Struct({
-  hook_event_name: exports_Schema.optionalKey(exports_Schema.Literal("PostToolUse")),
+var CommonEvent = {
   session_id: exports_Schema.String,
   agent_id: exports_Schema.optionalKey(exports_Schema.String),
   prompt_id: exports_Schema.optionalKey(exports_Schema.String),
   cwd: exports_Schema.optionalKey(exports_Schema.String),
   tool_name: exports_Schema.String,
   tool_input: exports_Schema.Unknown,
-  tool_response: exports_Schema.Array(exports_Schema.Unknown),
-});
+};
+var Event = exports_Schema.Union([
+  exports_Schema.Struct({
+    ...CommonEvent,
+    hook_event_name: exports_Schema.optionalKey(exports_Schema.Literal("PostToolUse")),
+    tool_response: exports_Schema.Array(exports_Schema.Unknown),
+  }),
+  exports_Schema.Struct({
+    ...CommonEvent,
+    hook_event_name: exports_Schema.Literal("PostToolUseFailure"),
+    error: exports_Schema.String,
+  }),
+]);
 var AwaitInput2 = exports_Schema.Struct({
+  requestId: exports_Schema.String.check(exports_Schema.isMinLength(1)),
+});
+var RetryRequired = exports_Schema.Struct({
+  kind: exports_Schema.Literal("retry_required"),
+  reason: exports_Schema.Literal("access_token_expired"),
   requestId: exports_Schema.String.check(exports_Schema.isMinLength(1)),
 });
 var Json4 = exports_Schema.fromJsonString(exports_Schema.Unknown);
@@ -23336,16 +23357,37 @@ try {
     context3 = { projectRoot, sessionId: event.session_id, promptId: event.prompt_id };
     if (event.agent_id !== undefined) context3 = { ...context3, agentId: event.agent_id };
   }
-  if (context3 !== undefined && toolName === "await_answer") {
-    const awaited = exports_Schema.decodeUnknownSync(AwaitInput2)(event.tool_input);
-    await exports_Effect.runPromise(completeClaudeWaitStart(context3, awaited.requestId));
+  const awaited =
+    toolName === "await_answer"
+      ? exports_Schema.decodeUnknownSync(AwaitInput2)(event.tool_input)
+      : undefined;
+  if (event.hook_event_name === "PostToolUseFailure") {
+    if (context3 !== undefined && awaited !== undefined)
+      await exports_Effect.runPromise(requireClaudeWaitStart(context3, awaited.requestId));
+    process.exit(0);
   }
   const text = event.tool_response
     .map((item) => exports_Schema.decodeUnknownOption(TextContent)(item))
     .find(exports_Option.isSome);
-  if (text === undefined) process.exit(0);
+  if (text === undefined) {
+    if (context3 !== undefined && awaited !== undefined)
+      await exports_Effect.runPromise(completeClaudeWaitStart(context3, awaited.requestId));
+    process.exit(0);
+  }
   const parsed = exports_Schema.decodeUnknownOption(Json4)(text.value.text);
-  if (exports_Option.isNone(parsed)) process.exit(0);
+  if (exports_Option.isNone(parsed)) {
+    if (context3 !== undefined && awaited !== undefined)
+      await exports_Effect.runPromise(completeClaudeWaitStart(context3, awaited.requestId));
+    process.exit(0);
+  }
+  const retry3 = exports_Schema.decodeUnknownOption(RetryRequired)(parsed.value);
+  if (exports_Option.isSome(retry3)) {
+    if (awaited === undefined || retry3.value.requestId !== awaited.requestId)
+      throw new Error("Needu retry result does not match its wait");
+    if (context3 !== undefined)
+      await exports_Effect.runPromise(requireClaudeWaitStart(context3, awaited.requestId));
+    process.exit(0);
+  }
   const options = {
     projectRoot,
     host: "claude",
@@ -23359,6 +23401,8 @@ try {
       event.agent_id === undefined ? options : { ...options, agentId: event.agent_id },
     ),
   );
+  if (context3 !== undefined && awaited !== undefined)
+    await exports_Effect.runPromise(completeClaudeWaitStart(context3, awaited.requestId));
   if (
     context3 !== undefined &&
     ["ask_user", "request_approval", "submit_requests"].includes(toolName)
