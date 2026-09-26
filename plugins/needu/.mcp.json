@@ -8,7 +8,7 @@
       "tool_timeout_sec": 3600,
       "http_headers": {
         "X-Needu-Plugin-Host": "codex",
-        "X-Needu-Plugin-Version": "0.1.10"
+        "X-Needu-Plugin-Version": "0.1.11"
       }
     }
   }

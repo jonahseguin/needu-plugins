@@ -3,10 +3,7 @@
     "needu": {
       "type": "http",
       "url": "https://needu.ai/mcp",
-      "headers": {
-        "X-Needu-Plugin-Host": "claude-code",
-        "X-Needu-Plugin-Version": "0.1.10"
-      }
+      "headersHelper": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/plugin-headers.mjs\""
     }
   }
 }
